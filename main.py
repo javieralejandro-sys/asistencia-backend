@@ -198,3 +198,6 @@ def get_asistencia_empleado(usuario_id: int, db: Session = Depends(get_db)):
         },
         "historial": historial
     }
+@app.get("/")
+def home():
+    return {"estado": "activo", "mensaje": "API de Asistencia y Nómina funcionando correctamente"}
