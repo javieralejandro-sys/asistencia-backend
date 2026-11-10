@@ -11,36 +11,33 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-# -----------------------------------------------------------------------------
 import os
 
-# Configuración de la base de datos conectada a la nube
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# -----------------------------------------------------------------------------
-# MODELOS / TABLAS
-# -----------------------------------------------------------------------------
+
 class UsuarioDB(Base):
     __tablename__ = "usuarios"
     id = Column(Integer, primary_key=True, index=True)
-    dui = Column(String, unique=True, index=True, nullable=False) # DUI del trabajador
+    dui = Column(String, unique=True, index=True, nullable=False) 
     nombre = Column(String, nullable=False)
-    rol = Column(String, nullable=False) # 'administrador', 'supervisor' o 'empleado'
+    rol = Column(String, nullable=False) 
     pin = Column(String, default="1234", nullable=False)
     cambiar_password = Column(Boolean, default=True)
-    activo = Column(Boolean, default=True) # Para pausar o dar de baja sin borrar
-    pago_diario = Column(Float, default=0.0)      # Pago fijo por día
-    pago_hora_extra = Column(Float, default=0.0)  # Pago fijo por hora extra
+    activo = Column(Boolean, default=True) 
+    pago_diario = Column(Float, default=0.0)      
+    pago_hora_extra = Column(Float, default=0.0)  
 
 class AsistenciaDB(Base):
     __tablename__ = "asistencias"
     id = Column(Integer, primary_key=True, index=True)
-    usuario_id = Column(Integer, ForeignKey("usuarios.id")) # Empleado que asistió
-    supervisor_id = Column(Integer, ForeignKey("usuarios.id")) # Supervisor que marcó
+    usuario_id = Column(Integer, ForeignKey("usuarios.id")) 
+    supervisor_id = Column(Integer, ForeignKey("usuarios.id")) 
     fecha = Column(String, nullable=False)
     hora_entrada = Column(String, nullable=True)
     hora_salida = Column(String, nullable=True)
@@ -60,9 +57,7 @@ def get_db():
     finally:
         db.close()
 
-# -----------------------------------------------------------------------------
-# ESQUEMAS PYDANTIC
-# -----------------------------------------------------------------------------
+
 class LoginRequest(BaseModel):
     dui: str
     pin: str
@@ -84,9 +79,7 @@ class SupervisorMarcarRequest(BaseModel):
     tipo: str # 'entrada', 'salida'
     horas_extras_extra: float = 0.0
 
-# -----------------------------------------------------------------------------
-# AUTENTICACIÓN
-# -----------------------------------------------------------------------------
+
 @app.post("/auth/login")
 def login_usuario(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(UsuarioDB).filter(UsuarioDB.dui == data.dui, UsuarioDB.activo == True).first()
@@ -113,9 +106,7 @@ def cambiar_password(data: UpdatePasswordRequest, db: Session = Depends(get_db))
     
     return {"status": "exito", "mensaje": "Contraseña actualizada correctamente"}
 
-# -----------------------------------------------------------------------------
-# GESTIÓN DE PERSONAL (SOLO ADMIN)
-# -----------------------------------------------------------------------------
+
 @app.post("/usuarios/crear")
 def crear_usuario(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
     existente = db.query(UsuarioDB).filter(UsuarioDB.dui == data.dui).first()
@@ -147,9 +138,6 @@ def cambiar_estado_usuario(usuario_id: int, activo: bool, db: Session = Depends(
     estado_texto = "activado" if activo else "pausado/dado de baja"
     return {"status": "exito", "mensaje": f"El usuario ha sido {estado_texto} correctamente."}
 
-# -----------------------------------------------------------------------------
-# MARCACIÓN DE ASISTENCIA (POR EL SUPERVISOR / ADMIN)
-# -----------------------------------------------------------------------------
 @app.post("/asistencia/supervisor-marcar")
 def supervisor_marcar_asistencia(data: SupervisorMarcarRequest, db: Session = Depends(get_db)):
     empleado = db.query(UsuarioDB).filter(UsuarioDB.dui == data.empleado_dui, UsuarioDB.rol == 'empleado').first()
@@ -186,9 +174,7 @@ def supervisor_marcar_asistencia(data: SupervisorMarcarRequest, db: Session = De
         db.commit()
         return {"status": "exito", "mensaje": f"Salida registrada para {empleado.nombre}. Horas extra totales: {registro.horas_extras}h"}
 
-# -----------------------------------------------------------------------------
-# CONSULTA DE EMPLEADO (SOLO LECTURA)
-# -----------------------------------------------------------------------------
+
 @app.get("/asistencia/empleado/{usuario_id}")
 def get_asistencia_empleado(usuario_id: int, db: Session = Depends(get_db)):
     asistencias = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == usuario_id).all()
