@@ -235,7 +235,7 @@ def generar_reporte_pdf(usuario_id: int = Query(None), db: Session = Depends(get
 
         t = Table(data_tabla)
         t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.bluegray),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
