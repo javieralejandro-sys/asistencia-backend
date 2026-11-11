@@ -1,10 +1,11 @@
 from fastapi import FastAPI, HTTPException, Depends, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, date
+import io
 
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -192,8 +193,8 @@ def generar_reporte_pdf(usuario_id: int = Query(None), db: Session = Depends(get
         query = query.filter(UsuarioDB.id == usuario_id)
     usuarios = query.all()
 
-    pdf_path = "reporte_nomina_full_metal.pdf"
-    doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
     elementos = []
 
     styles = getSampleStyleSheet()
@@ -243,7 +244,13 @@ def generar_reporte_pdf(usuario_id: int = Query(None), db: Session = Depends(get
     elementos.append(Paragraph(f"<b>Total General de Nómina en Obra: ${total_general_nomina:.2f}</b>", styles['Heading2']))
 
     doc.build(elementos)
-    return FileResponse(pdf_path, media_type='application/pdf', filename="reporte_nomina_full_metal.pdf")
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type='application/pdf',
+        headers={"Content-Disposition": "attachment; filename=reporte_nomina_full_metal.pdf"}
+    )
 
 @app.get("/")
 def home():
