@@ -1,11 +1,12 @@
 from fastapi import FastAPI, HTTPException, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, date
 import io
+import traceback
 
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -188,69 +189,77 @@ def get_asistencia_empleado(usuario_id: int, db: Session = Depends(get_db)):
 
 @app.get("/reporte/pdf")
 def generar_reporte_pdf(usuario_id: int = Query(None), db: Session = Depends(get_db)):
-    query = db.query(UsuarioDB).filter(UsuarioDB.activo == True)
-    if usuario_id:
-        query = query.filter(UsuarioDB.id == usuario_id)
-    usuarios = query.all()
+    try:
+        query = db.query(UsuarioDB).filter(UsuarioDB.activo == True)
+        if usuario_id:
+            query = query.filter(UsuarioDB.id == usuario_id)
+        usuarios = query.all()
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    elementos = []
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elementos = []
 
-    styles = getSampleStyleSheet()
-    elementos.append(Paragraph("<b>FULL METAL - Reporte de Nómina y Asistencia</b>", styles['Title']))
-    elementos.append(Paragraph(f"Generado el: {date.today()}", styles['Normal']))
-    elementos.append(Spacer(1, 15))
+        styles = getSampleStyleSheet()
+        elementos.append(Paragraph("<b>FULL METAL - Reporte de Nómina y Asistencia</b>", styles['Title']))
+        elementos.append(Paragraph(f"Generado el: {date.today()}", styles['Normal']))
+        elementos.append(Spacer(1, 15))
 
-    data_tabla = [["Colaborador", "Días", "P. Diario", "Subtotal Días", "Hrs Ext", "P. H.Ext", "Subtotal Ext", "Total a Pagar"]]
-    total_general_nomina = 0.0
+        data_tabla = [["Colaborador", "Días", "P. Diario", "Subtotal Días", "Hrs Ext", "P. H.Ext", "Subtotal Ext", "Total a Pagar"]]
+        total_general_nomina = 0.0
 
-    for u in usuarios:
-        asistencias = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == u.id).all()
-        dias_asistidos = len(asistencias)
-        if dias_asistidos == 0 and usuario_id is None:
-            continue
+        for u in usuarios:
+            asistencias = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == u.id).all()
+            dias_asistidos = len(asistencias)
+            if dias_asistidos == 0 and usuario_id is None:
+                continue
 
-        total_horas_extras = sum([a.horas_extras for a in asistencias])
-        subtotal_dias = dias_asistidos * u.pago_diario
-        subtotal_extras = total_horas_extras * u.pago_hora_extra
-        total_empleado = subtotal_dias + subtotal_extras
-        total_general_nomina += total_empleado
+            total_horas_extras = sum([a.horas_extras for a in asistencias]) if asistencias else 0.0
+            pago_d = u.pago_diario if u.pago_diario else 0.0
+            pago_he = u.pago_hora_extra if u.pago_hora_extra else 0.0
 
-        data_tabla.append([
-            str(u.nombre),
-            str(dias_asistidos),
-            f"${u.pago_diario:.2f}",
-            f"${subtotal_dias:.2f}",
-            f"{total_horas_extras}h",
-            f"${u.pago_hora_extra:.2f}",
-            f"${subtotal_extras:.2f}",
-            f"${total_empleado:.2f}"
-        ])
+            subtotal_dias = dias_asistidos * pago_d
+            subtotal_extras = total_horas_extras * pago_he
+            total_empleado = subtotal_dias + subtotal_extras
+            total_general_nomina += total_empleado
 
-    t = Table(data_tabla)
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.bluegray),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,-1), 9),
-        ('BOTTOMPADDING', (0,0), (-1,0), 6),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-    ]))
+            data_tabla.append([
+                str(u.nombre or "Sin Nombre"),
+                str(dias_asistidos),
+                f"${pago_d:.2f}",
+                f"${subtotal_dias:.2f}",
+                f"{total_horas_extras}h",
+                f"${pago_he:.2f}",
+                f"${subtotal_extras:.2f}",
+                f"${total_empleado:.2f}"
+            ])
 
-    elementos.append(t)
-    elementos.append(Spacer(1, 15))
-    elementos.append(Paragraph(f"<b>Total General de Nómina en Obra: ${total_general_nomina:.2f}</b>", styles['Heading2']))
+        t = Table(data_tabla)
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.bluegray),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('BOTTOMPADDING', (0,0), (-1,0), 6),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ]))
 
-    doc.build(elementos)
-    buffer.seek(0)
+        elementos.append(t)
+        elementos.append(Spacer(1, 15))
+        elementos.append(Paragraph(f"<b>Total General de Nómina en Obra: ${total_general_nomina:.2f}</b>", styles['Heading2']))
 
-    return StreamingResponse(
-        buffer,
-        media_type='application/pdf',
-        headers={"Content-Disposition": "attachment; filename=reporte_nomina_full_metal.pdf"}
-    )
+        doc.build(elementos)
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type='application/pdf',
+            headers={"Content-Disposition": "attachment; filename=reporte_nomina_full_metal.pdf"}
+        )
+    except Exception as e:
+        error_detalles = traceback.format_exc()
+        print("ERROR EN PDF:", error_detalles)
+        return JSONResponse(status_code=500, content={"error": str(e), "detalles": error_detalles})
 
 @app.get("/")
 def home():
