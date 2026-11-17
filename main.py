@@ -179,6 +179,7 @@ class SupervisorMarcarRequest(BaseModel):
     supervisor_id: int
     tipo: str
     proyecto: Optional[str] = "Obra General"
+    fecha_manual: Optional[str] = None
     hora_manual: Optional[str] = None
     horas_extras_extra: float = 0.0
     ubicacion_2: Optional[str] = None
@@ -204,7 +205,6 @@ def login_usuario(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(UsuarioDB).filter(UsuarioDB.dui == data.dui, UsuarioDB.activo == True).first()
     if not user or user.pin != data.pin:
         raise HTTPException(status_code=401, detail="DUI o contraseña incorrectos (o usuario inactivo)")
-    
     return {
         "status": "exito",
         "usuario_id": user.id,
@@ -218,7 +218,6 @@ def cambiar_password(data: UpdatePasswordRequest, db: Session = Depends(get_db))
     user = db.query(UsuarioDB).filter(UsuarioDB.dui == data.dui).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
     user.pin = data.nuevo_pin
     user.cambiar_password = False
     db.commit()
@@ -258,7 +257,6 @@ def crear_usuario(data: CrearUsuarioRequest, db: Session = Depends(get_db)):
     existente = db.query(UsuarioDB).filter(UsuarioDB.dui == data.dui).first()
     if existente:
         raise HTTPException(status_code=400, detail="El DUI ya está registrado.")
-    
     p_diario = data.pago_diario
     p_extra = data.pago_hora_extra
     if (p_diario is None or p_extra is None) and data.puesto:
@@ -294,7 +292,6 @@ def cambiar_estado_usuario(
     user = db.query(UsuarioDB).filter(UsuarioDB.id == usuario_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
     user.activo = activo
     if not activo:
         user.fecha_baja = fecha_baja or str(date.today())
@@ -315,18 +312,17 @@ def supervisor_marcar_asistencia(data: SupervisorMarcarRequest, db: Session = De
     if not empleado:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
 
-    hoy = str(date.today())
+    fecha_registro = data.fecha_manual or str(date.today())
     hora_actual = data.hora_manual or datetime.now().strftime("%H:%M:%S")
 
     if data.tipo == 'entrada':
-        existe = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == empleado.id, AsistenciaDB.fecha == hoy).first()
+        existe = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == empleado.id, AsistenciaDB.fecha == fecha_registro).first()
         if existe:
-            raise HTTPException(status_code=400, detail="El empleado ya tiene registrada su entrada hoy.")
-        
+            raise HTTPException(status_code=400, detail="El empleado ya tiene registrada su entrada en esta fecha.")
         nueva = AsistenciaDB(
             usuario_id=empleado.id,
             supervisor_id=data.supervisor_id,
-            fecha=hoy,
+            fecha=fecha_registro,
             proyecto=data.proyecto or "Obra General",
             hora_entrada=hora_actual,
             horas_extras=data.horas_extras_extra,
@@ -335,13 +331,12 @@ def supervisor_marcar_asistencia(data: SupervisorMarcarRequest, db: Session = De
         )
         db.add(nueva)
         db.commit()
-        return {"status": "exito", "mensaje": f"Entrada registrada para {empleado.nombre} en {nueva.proyecto}"}
+        return {"status": "exito", "mensaje": f"Entrada registrada para {empleado.nombre} el {fecha_registro}"}
 
     elif data.tipo == 'salida':
-        registro = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == empleado.id, AsistenciaDB.fecha == hoy).first()
+        registro = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == empleado.id, AsistenciaDB.fecha == fecha_registro).first()
         if not registro:
-            raise HTTPException(status_code=400, detail="No se encontró registro de entrada para hoy de este empleado.")
-        
+            raise HTTPException(status_code=400, detail="No se encontró registro de entrada para esta fecha de este empleado.")
         registro.hora_salida = hora_actual
         if data.horas_extras_extra > 0:
             registro.horas_extras += data.horas_extras_extra
@@ -353,20 +348,17 @@ def supervisor_marcar_asistencia(data: SupervisorMarcarRequest, db: Session = De
         if data.justificado:
             registro.justificado = True
             registro.nota_justificacion = data.nota_justificacion
-            
         db.commit()
-        return {"status": "exito", "mensaje": f"Salida registrada para {empleado.nombre}."}
+        return {"status": "exito", "mensaje": f"Salida registrada para {empleado.nombre} el {fecha_registro}."}
 
 @app.post("/anticipos/registrar")
 def registrar_anticipo(data: AnticipoRequest, db: Session = Depends(get_db)):
     autorizador = db.query(UsuarioDB).filter(UsuarioDB.id == data.autorizado_por_id).first()
     if not autorizador or autorizador.rol not in ["administrador", "supervisor", "contador"]:
         raise HTTPException(status_code=403, detail="Solo administrador, supervisor o contador pueden autorizar anticipos.")
-
     empleado = db.query(UsuarioDB).filter(UsuarioDB.id == data.usuario_id).first()
     if not empleado:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
-
     nuevo_anticipo = AnticipoDB(
         usuario_id=empleado.id,
         autorizado_por_id=autorizador.id,
@@ -378,17 +370,15 @@ def registrar_anticipo(data: AnticipoRequest, db: Session = Depends(get_db)):
     db.commit()
     return {
         "status": "exito",
-        "mensaje": f"Anticipo de ${data.monto:.2f} registrado para {empleado.nombre} por {autorizador.nombre} ({autorizador.rol})."
+        "mensaje": f"Anticipo de ${data.monto:.2f} registrado para {empleado.nombre}."
     }
 
 @app.get("/asistencia/empleado/{usuario_id}")
 def get_asistencia_empleado(usuario_id: int, db: Session = Depends(get_db)):
     asistencias = db.query(AsistenciaDB).filter(AsistenciaDB.usuario_id == usuario_id).all()
-    
     historial = []
     total_dias = len(asistencias)
     total_horas_extras = sum([a.horas_extras for a in asistencias])
-
     for a in asistencias:
         historial.append({
             "fecha": a.fecha,
@@ -399,7 +389,6 @@ def get_asistencia_empleado(usuario_id: int, db: Session = Depends(get_db)):
             "justificado": a.justificado,
             "horas_extras": a.horas_extras
         })
-
     return {
         "resumen": {
             "dias_asistidos": total_dias,
@@ -604,7 +593,7 @@ def generar_pdf_nomina(fecha_inicio: str, fecha_fin: str, db: Session = Depends(
 
     elementos.append(Paragraph("<b>FULL METAL — REPORTE CONTABLE DE NÓMINA</b>", styles["Title"]))
     elementos.append(Paragraph(
-        f"Periodo: {fecha_inicio} al {fecha_fin} | <i>Nota Contable: Salarios netos libres de retenciones (Impuestos de ley absorbidos por la empresa). Jornada base: 8h efectivas.</i>",
+        f"Periodo: {fecha_inicio} al {fecha_fin} | <i>Nota Contable: Salarios netos libres de retenciones.</i>",
         styles["Normal"]
     ))
     elementos.append(Spacer(1, 10))
@@ -660,7 +649,7 @@ def generar_pdf_ubicacion(
 
     elementos.append(Paragraph("<b>FULL METAL — CONSTANCIA DE UBICACIÓN Y ASISTENCIA LABORAL</b>", styles["Title"]))
     elementos.append(Paragraph(
-        f"Periodo Consultado: {fecha_inicio} al {fecha_fin} | Documento oficial de trazabilidad operativa en obra/oficina.",
+        f"Periodo Consultado: {fecha_inicio} al {fecha_fin} | Documento oficial.",
         styles["Normal"]
     ))
     elementos.append(Spacer(1, 12))
