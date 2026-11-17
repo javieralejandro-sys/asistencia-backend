@@ -113,11 +113,22 @@ def get_db():
 def inicializar_catalogos(db: Session):
     if db.query(PuestoDB).count() == 0:
         puestos_iniciales = [
-            PuestoDB(nombre="Ayudante 1", pago_diario=18.00, pago_hora_extra=3.00),
-            PuestoDB(nombre="Ayudante 2", pago_diario=20.00, pago_hora_extra=3.25),
-            PuestoDB(nombre="Ayudante 3", pago_diario=22.00, pago_hora_extra=3.50),
-            PuestoDB(nombre="Soldador / Armador", pago_diario=28.00, pago_hora_extra=4.50),
-            PuestoDB(nombre="Maestro de Obra", pago_diario=35.00, pago_hora_extra=5.50),
+            PuestoDB(nombre="ARGONERO", pago_diario=60.00, pago_hora_extra=8.00),
+            PuestoDB(nombre="AYUDANTE 1", pago_diario=20.00, pago_hora_extra=3.50),
+            PuestoDB(nombre="AYUDANTE 2", pago_diario=18.75, pago_hora_extra=3.50),
+            PuestoDB(nombre="AYUDANTE 3", pago_diario=16.00, pago_hora_extra=3.50),
+            PuestoDB(nombre="MECANICO 1", pago_diario=30.00, pago_hora_extra=5.00),
+            PuestoDB(nombre="MECANICO 2", pago_diario=25.00, pago_hora_extra=5.00),
+            PuestoDB(nombre="MECANICO 3", pago_diario=22.00, pago_hora_extra=4.00),
+            PuestoDB(nombre="SOLDADOR 1", pago_diario=40.00, pago_hora_extra=6.00),
+            PuestoDB(nombre="SOLDADOR 2", pago_diario=35.00, pago_hora_extra=5.00),
+            PuestoDB(nombre="SOLDADOR 3", pago_diario=32.00, pago_hora_extra=5.00),
+            PuestoDB(nombre="PINTOR", pago_diario=25.00, pago_hora_extra=5.00),
+            PuestoDB(nombre="PINTOR2", pago_diario=20.00, pago_hora_extra=3.50),
+            PuestoDB(nombre="BODEGUERO", pago_diario=20.00, pago_hora_extra=3.50),
+            PuestoDB(nombre="AUXILIAR DE BODEGA", pago_diario=16.00, pago_hora_extra=3.50),
+            PuestoDB(nombre="MOTORISTA", pago_diario=20.00, pago_hora_extra=3.50),
+            PuestoDB(nombre="SUPERVISOR", pago_diario=66.67, pago_hora_extra=8.00),
         ]
         db.add_all(puestos_iniciales)
 
@@ -426,6 +437,7 @@ def calcular_pago_dia(emp: UsuarioDB, fecha_str: str, reg: Optional[AsistenciaDB
     tarifa_hora = tarifa_dia / 8.0
     tarifa_he = emp.pago_hora_extra
     es_domingo = (f_date.weekday() == 6)
+    es_sabado = (f_date.weekday() == 5)
 
     if emp.fecha_baja and fecha_str > emp.fecha_baja:
         return {"estado": "INACTIVO", "pago": 0.0, "he_norm": 0.0, "he_noct": 0.0, "dom_h": 0.0}
@@ -480,6 +492,18 @@ def calcular_pago_dia(emp: UsuarioDB, fecha_str: str, reg: Optional[AsistenciaDB
             "he_norm": 0.0,
             "he_noct": 0.0,
             "dom_h": round(h_efectivas, 2)
+        }
+
+    if es_sabado:
+        h_sabado_normal = min(h_efectivas, 4.0)
+        h_sabado_extra = max(0.0, h_efectivas - 4.0) + (reg.horas_extras or 0.0)
+        pago_sabado = (h_sabado_normal * (tarifa_dia / 4.0)) + (h_sabado_extra * tarifa_he)
+        return {
+            "estado": "SABADO",
+            "pago": round(pago_sabado, 2),
+            "he_norm": round(h_sabado_extra, 2),
+            "he_noct": 0.0,
+            "dom_h": 0.0
         }
 
     if h_efectivas < 8.0:
